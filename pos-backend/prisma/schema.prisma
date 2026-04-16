@@ -1,150 +1,382 @@
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
   provider = "prisma-client-js"
 }
 
+// ============================================================================
+// MULTI-TENANT & AUTH MODELS
+// ============================================================================
+
+/// Tenant represents a single SaaS customer
+model Tenant {
+  id                String         @id @default(cuid())
+  name              String
+  plan              String         @default("starter") // starter, pro, enterprise
+  status            String         @default("active") // active, suspended, canceled
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  
+  // Relations
+  users             User[]
+  products          Product[]
+  clients           Client[]
+  sales             Sale[]
+  sellers           Seller[]
+  taxes             Tax[]
+  branches          BranchSettings[]
+  promotions        PromotionSettings[]
+  stockMovements    StockMovement[]
+  salePayments      SalePayment[]
+  clientPayments    ClientPayment[]
+  storeSettings     StoreSettings?
+  subscription      Subscription?
+  
+  @@index([status])
+  @@index([plan])
+}
+
+/// User represents a tenant member with role-based access
+model User {
+  id                String       @id @default(cuid())
+  email             String       @unique
+  password          String       // Should be hashed in production
+  name              String?
+  role              Role         @default(CASHIER)
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  active            Boolean      @default(true)
+  lastLogin         DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@unique([email, tenantId])
+  @@index([tenantId])
+  @@index([role])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  CASHIER
+  WAREHOUSE
+}
+
+/// Subscription tracks SaaS billing for each tenant
+model Subscription {
+  id                String       @id @default(cuid())
+  tenantId          String       @unique
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan              String       // starter, pro, enterprise
+  status            String       // active, past_due, canceled
+  currentPeriodStart DateTime
+  currentPeriodEnd  DateTime
+  canceledAt        DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@index([tenantId])
+  @@index([status])
+}
+
+// ============================================================================
+// EXISTING BUSINESS MODELS - UPDATED FOR MULTI-TENANCY
+// ============================================================================
+
 model Product {
-  id              Int    @id @default(autoincrement())
-  name            String
-  isWeighable     Boolean @default(false)
-  pricePerKg      Float?
-  price           Float?
-  description     String?
-  stock           Int    @default(0)
-  taxId           Int?   // IVA del producto (opcional, hereda tienda si no está)
-  tax             Tax?   @relation(fields: [taxId], references: [id], onDelete: SetNull)
-  createdAt       DateTime @default(now())
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String
+  description       String?
+  isWeighable       Boolean          @default(false)
+  pricePerKg        Float?
+  price             Float?
+  stock             Float            @default(0)
+  sku               String?          // Stock Keeping Unit
+  
+  taxId             String?
+  tax               Tax?             @relation(fields: [taxId], references: [id], onDelete: SetNull)
+  
+  saleItems         SaleItem[]
+  stockMovements    StockMovement[]
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([taxId])
 }
 
 model Client {
-  id                Int    @id @default(autoincrement())
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
   name              String
   email             String?
   phone             String?
   address           String?
-  cuit              String?  // CUIT/CUIL del cliente
-  ivaCategory       String  @default("CONSUMIDOR_FINAL") // Categoría de IVA
-  // CONSUMIDOR_FINAL, RESPONSABLE_INSCRIPTO, MONOTRIBUTISTA, EXENTO, NO_RESPONSABLE, SUJETO_NO_IDENTIFICADO
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  city              String?
+  province          String?
+  postalCode        String?
+  country           String           @default("Argentina")
+  cuit              String?          // CUIT/CUIL del cliente
   
-  // Relaciones
+  ivaCategory       String           @default("CONSUMIDOR_FINAL")
+  // CONSUMIDOR_FINAL, RESPONSABLE_INSCRIPTO, MONOTRIBUTISTA, EXENTO, NO_RESPONSABLE, SUJETO_NO_IDENTIFICADO
+  
+  // Stats
+  totalSpent        Float            @default(0)
+  purchaseCount     Int              @default(0)
+  lastPurchaseDate  DateTime?
+  
   sales             Sale[]
   payments          ClientPayment[]
   
-  // Estadísticas
-  totalSpent        Float   @default(0)
-  purchaseCount     Int     @default(0)
-  lastPurchaseDate  DateTime?
-}
-
-model ClientPayment {
-  id                Int    @id @default(autoincrement())
-  clientId          Int
-  client            Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  amount            Float
-  description       String?
-  type              String  @default("DEBT_PAYMENT") // DEBT_PAYMENT, CREDIT, DEBIT
-  createdAt         DateTime @default(now())
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@unique([tenantId, cuit])
+  @@index([tenantId])
+  @@index([ivaCategory])
 }
 
 model Sale {
-  id               Int        @id @default(autoincrement())
-  total            Float
-  tenantId         Int
-  clientId         Int?
-  client           Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  sellerName       String?    // Nombre del vendedor
-  paymentMethod    String     @default("CASH")
-  paymentBreakdown String?    // JSON con desglose de múltiples pagos
-  ivaTaxId         Int?
-  ivaTax           Tax?       @relation(fields: [ivaTaxId], references: [id], onDelete: SetNull)
-  taxAmount        Float?     @default(0)
-  items            SaleItem[]
-  createdAt        DateTime   @default(now())
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  clientId          String?
+  client            Client?          @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  
+  sellerId          String?
+  seller            Seller?          @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  
+  total             Float
+  taxAmount         Float            @default(0)
+  
+  ivaTaxId          String?
+  ivaTax            Tax?             @relation(fields: [ivaTaxId], references: [id], onDelete: SetNull)
+  
+  status            String           @default("completed") // completed, pending, canceled
+  
+  items             SaleItem[]
+  payments          SalePayment[]
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model SaleItem {
-  id        Int    @id @default(autoincrement())
-  saleId    Int
-  sale      Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId Int
-  productName String
-  quantity  Int    @default(1)
-  weight    Float? @default(0)
-  price     Float
+  id                String           @id @default(cuid())
+  saleId            String
+  sale              Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  
+  productId         String
+  product           Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  
+  productName       String           // Snapshot of product name at time of sale
+  quantity          Float            @default(1)
+  weight            Float?           // For weighable products
+  price             Float            // Price at time of sale
+  
+  @@index([saleId])
+  @@index([productId])
+}
+
+/// SalePayment replaces JSON paymentBreakdown
+/// Allows multiple payment methods per sale
+model SalePayment {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  saleId            String
+  sale              Sale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  
+  method            String           // CASH, CARD, CHECK, TRANSFER, OTHER
+  amount            Float
+  reference         String?          // Check number, transaction ID, etc
+  
+  createdAt         DateTime         @default(now())
+  
+  @@index([tenantId])
+  @@index([saleId])
+  @@index([method])
 }
 
 model Seller {
-  id              Int    @id @default(autoincrement())
-  name            String
-  active          Boolean @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String
+  email             String?
+  phone             String?
+  commission        Float            @default(0) // Commission percentage
+  active            Boolean          @default(true)
+  
+  sales             Sale[]
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model Tax {
-  id          Int     @id @default(autoincrement())
-  name        String  // IVA, IIBB, etc
-  percentage  Float   // 21, 10.5, etc
-  type        String  @default("IVA") // IVA, IIBB, MUNICIPAL
-  active      Boolean @default(true)
-  sales       Sale[]
-  products    Product[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-model StoreSettings {
-  id              Int    @id @default(autoincrement())
-  storeName       String @default("Mi Tienda")
-  storeEmail      String?
-  storePhone      String?
-  storeAddress    String?
-  storeCity       String?
-  storeProvince   String?
-  storePostalCode String?
-  storeCountry    String @default("Argentina")
-  cuit            String?
-  invoicePrefix   String @default("FC")
-  currency        String @default("ARS")
-  timezone        String @default("America/Argentina/Buenos_Aires")
-  logo            String? // URL o path
-  theme           String @default("light") // light, dark
-  defaultSellerId Int?   // Vendedor predefinido
-  defaultIvaTaxId Int?   // IVA predefinido
-  updatedAt       DateTime @updatedAt
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String           // "IVA 21%", "IIBB", etc
+  percentage        Float            // 21, 10.5, etc
+  type              String           // IVA, IIBB, MUNICIPAL
+  active            Boolean          @default(true)
+  
+  products          Product[]
+  sales             Sale[]
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model BranchSettings {
-  id              Int    @id @default(autoincrement())
-  name            String // Sucursal Centro, Sucursal Zona Norte, etc
-  email           String?
-  phone           String?
-  address         String
-  city            String?
-  province        String?
-  postalCode      String?
-  manager         String?
-  isMainBranch    Boolean @default(false)
-  active          Boolean @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String
+  email             String?
+  phone             String?
+  address           String
+  city              String?
+  province          String?
+  postalCode        String?
+  country           String           @default("Argentina")
+  manager           String?
+  
+  isMainBranch      Boolean          @default(false)
+  active            Boolean          @default(true)
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model PromotionSettings {
-  id              Int    @id @default(autoincrement())
-  name            String // "Black Friday", "Navidad"
-  type            String @default("PERCENTAGE") // PERCENTAGE, FIXED_AMOUNT, BUY_X_GET_Y
-  discountValue   Float
-  conditions      String? // JSON con condiciones
-  startDate       DateTime
-  endDate         DateTime
-  active          Boolean @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String
+  description       String?
+  type              String           // PERCENTAGE, FIXED_AMOUNT, BUY_X_GET_Y, FREE_SHIPPING
+  discountValue     Float
+  conditions        String?          // JSON with conditions
+  
+  startDate         DateTime
+  endDate           DateTime
+  active            Boolean          @default(true)
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([active])
+}
+
+/// StockMovement tracks all inventory changes
+/// Enables audit trail and history
+model StockMovement {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  productId         String
+  product           Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  
+  type              String           // SALE, PURCHASE, ADJUSTMENT, RETURN
+  quantity          Float            // Can be negative for removals
+  reference         String?          // Sale ID, PO number, etc
+  reason            String?          // For adjustments
+  
+  createdAt         DateTime         @default(now())
+  
+  @@index([tenantId])
+  @@index([productId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+/// ClientPayment tracks account payments (credit account)
+model ClientPayment {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  clientId          String
+  client            Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  amount            Float
+  description       String?
+  type              String           @default("DEBT_PAYMENT") // DEBT_PAYMENT, CREDIT, DEBIT
+  reference         String?
+  
+  createdAt         DateTime         @default(now())
+  
+  @@index([tenantId])
+  @@index([clientId])
+}
+
+/// StoreSettings - One per tenant
+model StoreSettings {
+  id                String           @id @default(cuid())
+  tenantId          String           @unique
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  storeName         String           @default("Mi Tienda")
+  storeEmail        String?
+  storePhone        String?
+  storeAddress      String?
+  storeCity         String?
+  storeProvince     String?
+  storePostalCode   String?
+  storeCountry      String           @default("Argentina")
+  cuit              String?
+  
+  invoicePrefix     String           @default("FC")
+  invoiceNextNumber Int              @default(1)
+  
+  currency          String           @default("ARS")
+  timezone          String           @default("America/Argentina/Buenos_Aires")
+  logo              String?          // URL or path
+  theme             String           @default("light") // light, dark
+  
+  defaultSellerId   String?
+  defaultTaxId      String?
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@index([tenantId])
 }

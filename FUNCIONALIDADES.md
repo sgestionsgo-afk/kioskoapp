@@ -561,6 +561,50 @@ DELETE /settings/promotions/:id - Eliminar promoción
 
 ---
 
-**Versión:** 0.1.0  
+---
+
+## 🚀 HOJA DE RUTA - SAAS REFACTOR
+
+El sistema está siendo refactorizado para convertirse en una **plataforma SaaS production-ready**. 
+
+### Fase 1: Arquitectura Multi-Tenant ✅
+- [x] Modelo Tenant raíz
+- [x] Tenant ID en todos los modelos
+- [x] Indexes para optimización
+
+### Fase 2: Autenticación & Autorización ✅
+- [x] Modelo User con roles
+- [x] Roles: OWNER, ADMIN, CASHIER, WAREHOUSE
+- [x] Email único por tenant
+
+### Fase 3: Modelos Relacionales ✅
+- [x] SalePayment (reemplaza JSON)
+- [x] StockMovement (historial de inventario)
+- [x] ClientPayment mejorado
+
+### Fase 4: Preparación para PostgreSQL ✅
+- [x] IDs con cuid() (distribuido)
+- [x] Migraciones Prisma
+- [x] Indexes para performance
+
+### Fase 5: Sistema de Billing ✅
+- [x] Modelo Subscription
+- [x] Plans: Starter, Pro, Enterprise
+- [x] Stripe integration ready
+
+### Fase 6: Por Implementar 🔄
+- [ ] Auth Service (JWT, login, registro)
+- [ ] Migración de datos SQLite → PostgreSQL
+- [ ] Billing Service (Stripe)
+- [ ] Guardias de middleware (tenantId)
+- [ ] Tests unitarios e integración
+- [ ] Frontend OAuth2
+- [ ] Documentación API (OpenAPI/Swagger)
+
+**Ver detalles completos en:** [SAAS_REFACTOR.md](./pos-backend/SAAS_REFACTOR.md)
+
+---
+
+**Versión:** 0.2.0 (SaaS Pre-Release)  
 **Última actualización:** Abril 16, 2026  
-**Estado:** En desarrollo y optimización
+**Estado:** Refactorización en progreso - Arquitectura SaaS implementada
