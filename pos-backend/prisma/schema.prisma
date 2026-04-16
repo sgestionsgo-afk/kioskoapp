@@ -34,6 +34,8 @@ model Tenant {
   clientPayments    ClientPayment[]
   storeSettings     StoreSettings?
   subscription      Subscription?
+  cashRegisters     CashRegister[]
+  cashMovements     CashMovement[]
   
   @@index([status])
   @@index([plan])
@@ -52,6 +54,9 @@ model User {
   lastLogin         DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+  
+  cashRegistersOpened  CashRegister[] @relation("CashRegisterOpenedBy")
+  cashRegistersClosed  CashRegister[] @relation("CashRegisterClosedBy")
   
   @@unique([email, tenantId])
   @@index([tenantId])
@@ -379,4 +384,84 @@ model StoreSettings {
   updatedAt         DateTime         @updatedAt
   
   @@index([tenantId])
+}
+
+// ============================================================================
+// CASH REGISTER MODELS
+// ============================================================================
+
+/// CashRegister tracks opening and closing of the point of sale cash drawer
+/// Only one OPEN register per tenant at any given time
+model CashRegister {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  openedByUserId    String
+  openedByUser      User             @relation("CashRegisterOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  
+  closedByUserId    String?
+  closedByUser      User?            @relation("CashRegisterClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  
+  status            String           @default("OPEN") // OPEN, CLOSED
+  
+  openingAmount     Float            // Initial cash amount
+  closingAmount     Float?           // Real cash counted
+  expectedAmount    Float?           // openingAmount + incomes + sales - expenses
+  difference        Float?           // closingAmount - expectedAmount (can be negative)
+  
+  openedAt          DateTime         @default(now())
+  closedAt          DateTime?
+  
+  movements         CashMovement[]
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@index([tenantId])
+  @@index([status])
+  @@index([openedByUserId])
+  @@index([closedByUserId])
+  @@index([openedAt])
+}
+
+enum CashMovementType {
+  SALE       // Money from a sale (positive)
+  INCOME     // Manual income entry (positive)
+  EXPENSE    // Manual expense entry (negative)
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  CHECK
+  CRYPTO
+  OTHER
+}
+
+/// CashMovement tracks all money movements through the cash register
+model CashMovement {
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  cashRegisterId    String
+  cashRegister      CashRegister     @relation(fields: [cashRegisterId], references: [id], onDelete: Restrict)
+  
+  type              CashMovementType
+  paymentMethod     PaymentMethod    @default(CASH)
+  amount            Float            // Positive amount (type field determines sign)
+  
+  referenceId       String?          // saleId, salePaymentId for linking
+  referenceType     String?          // SALE, EXPENSE_VOUCHER, etc
+  description       String?          // "Refund", "Stock purchase", etc
+  
+  createdAt         DateTime         @default(now())
+  
+  @@index([tenantId])
+  @@index([cashRegisterId])
+  @@index([type])
+  @@index([paymentMethod])
+  @@index([referenceId])
 }

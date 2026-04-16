@@ -1,12 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CashService } from '../cash/cash.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { UpdateSaleDto } from './dto/update-sale.dto';
 import { SalesStatsDto, SaleDetailDto, PaymentMethodStatsDto } from './dto/sales-stats.dto';
 
 @Injectable()
 export class SalesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cashService: CashService,
+  ) {}
 
   async create(createSaleDto: CreateSaleDto) {
     // Determinar método de pago principal
@@ -81,6 +85,20 @@ export class SalesService {
           lastPurchaseDate: new Date(),
         },
       });
+    }
+
+    // Auto-register SALE movement in the open cash register (non-blocking)
+    if (createSaleDto.tenantId) {
+      try {
+        await this.cashService.registerSaleMovement(
+          createSaleDto.tenantId,
+          sale.id,
+          sale.total,
+          primaryPaymentMethod,
+        );
+      } catch (err) {
+        console.error('[SalesService] Failed to register cash movement:', err);
+      }
     }
 
     return sale;
