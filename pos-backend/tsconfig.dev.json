@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "sourceMap": false,
+    "declaration": false,
+    "removeComments": true,
+    "skipLibCheck": true,
+    "incremental": true,
+    "allowJs": true,
+    "noEmit": false,
+    "emitOnlyDeclFiles": false
+  },
+  "exclude": ["node_modules", "dist", "test"]
+}

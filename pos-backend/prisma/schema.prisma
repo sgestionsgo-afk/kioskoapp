@@ -1,0 +1,150 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Product {
+  id              Int    @id @default(autoincrement())
+  name            String
+  isWeighable     Boolean @default(false)
+  pricePerKg      Float?
+  price           Float?
+  description     String?
+  stock           Int    @default(0)
+  taxId           Int?   // IVA del producto (opcional, hereda tienda si no está)
+  tax             Tax?   @relation(fields: [taxId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+}
+
+model Client {
+  id                Int    @id @default(autoincrement())
+  name              String
+  email             String?
+  phone             String?
+  address           String?
+  cuit              String?  // CUIT/CUIL del cliente
+  ivaCategory       String  @default("CONSUMIDOR_FINAL") // Categoría de IVA
+  // CONSUMIDOR_FINAL, RESPONSABLE_INSCRIPTO, MONOTRIBUTISTA, EXENTO, NO_RESPONSABLE, SUJETO_NO_IDENTIFICADO
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relaciones
+  sales             Sale[]
+  payments          ClientPayment[]
+  
+  // Estadísticas
+  totalSpent        Float   @default(0)
+  purchaseCount     Int     @default(0)
+  lastPurchaseDate  DateTime?
+}
+
+model ClientPayment {
+  id                Int    @id @default(autoincrement())
+  clientId          Int
+  client            Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  amount            Float
+  description       String?
+  type              String  @default("DEBT_PAYMENT") // DEBT_PAYMENT, CREDIT, DEBIT
+  createdAt         DateTime @default(now())
+}
+
+model Sale {
+  id               Int        @id @default(autoincrement())
+  total            Float
+  tenantId         Int
+  clientId         Int?
+  client           Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  sellerName       String?    // Nombre del vendedor
+  paymentMethod    String     @default("CASH")
+  paymentBreakdown String?    // JSON con desglose de múltiples pagos
+  ivaTaxId         Int?
+  ivaTax           Tax?       @relation(fields: [ivaTaxId], references: [id], onDelete: SetNull)
+  taxAmount        Float?     @default(0)
+  items            SaleItem[]
+  createdAt        DateTime   @default(now())
+}
+
+model SaleItem {
+  id        Int    @id @default(autoincrement())
+  saleId    Int
+  sale      Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId Int
+  productName String
+  quantity  Int    @default(1)
+  weight    Float? @default(0)
+  price     Float
+}
+
+model Seller {
+  id              Int    @id @default(autoincrement())
+  name            String
+  active          Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Tax {
+  id          Int     @id @default(autoincrement())
+  name        String  // IVA, IIBB, etc
+  percentage  Float   // 21, 10.5, etc
+  type        String  @default("IVA") // IVA, IIBB, MUNICIPAL
+  active      Boolean @default(true)
+  sales       Sale[]
+  products    Product[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StoreSettings {
+  id              Int    @id @default(autoincrement())
+  storeName       String @default("Mi Tienda")
+  storeEmail      String?
+  storePhone      String?
+  storeAddress    String?
+  storeCity       String?
+  storeProvince   String?
+  storePostalCode String?
+  storeCountry    String @default("Argentina")
+  cuit            String?
+  invoicePrefix   String @default("FC")
+  currency        String @default("ARS")
+  timezone        String @default("America/Argentina/Buenos_Aires")
+  logo            String? // URL o path
+  theme           String @default("light") // light, dark
+  defaultSellerId Int?   // Vendedor predefinido
+  defaultIvaTaxId Int?   // IVA predefinido
+  updatedAt       DateTime @updatedAt
+}
+
+model BranchSettings {
+  id              Int    @id @default(autoincrement())
+  name            String // Sucursal Centro, Sucursal Zona Norte, etc
+  email           String?
+  phone           String?
+  address         String
+  city            String?
+  province        String?
+  postalCode      String?
+  manager         String?
+  isMainBranch    Boolean @default(false)
+  active          Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model PromotionSettings {
+  id              Int    @id @default(autoincrement())
+  name            String // "Black Friday", "Navidad"
+  type            String @default("PERCENTAGE") // PERCENTAGE, FIXED_AMOUNT, BUY_X_GET_Y
+  discountValue   Float
+  conditions      String? // JSON con condiciones
+  startDate       DateTime
+  endDate         DateTime
+  active          Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
